@@ -1,0 +1,25 @@
+# Dependencies and local caches
+node_modules/
+
+# Build output
+dist/
+*.log
+*.dmp
+*.tmp
+
+# Native toolchain (several hundred MB, unpacked locally, never committed)
+tools/
+
+# Native build artifacts
+native/**/build/
+native/**/bin/
+native/**/out/
+
+# Local verification evidence
+.verify/
+
+# Acceptance targets: used locally only, not shipped
+tests/
+
+# Design notes: kept locally for reference, not shipped
+docs/

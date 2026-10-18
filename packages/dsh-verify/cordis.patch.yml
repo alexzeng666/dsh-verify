@@ -1,0 +1,18 @@
+# dsh-verify bundle patch.
+#
+# The umbrella package mounts all four sub-plugins plus itself in one go. All parameters live in each plugin's own Config; no values are written here.
+#
+# Note: the four sub-packages must be installed in the same profile (or pulled in as dsh-verify dependencies),
+# otherwise these lines will not resolve the package names.
+- insert:
+    - id: verify-quota
+      name: "@alexzeng666/dsh-quota"
+    - id: verify-crashlab
+      name: "@alexzeng666/dsh-crashlab"
+    - id: verify-probe
+      name: "@alexzeng666/dsh-probe"
+    - id: verify-timelab
+      name: "@alexzeng666/dsh-timelab"
+    - id: verify-orchestrator
+      name: "@alexzeng666/dsh-verify"
+      inject: [tools, systemPrompt]

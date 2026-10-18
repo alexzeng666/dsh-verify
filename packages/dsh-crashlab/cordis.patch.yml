@@ -1,0 +1,7 @@
+# dsh-crashlab bundle patch.
+#
+# All parameters live in Config in src/index.js; this file only mounts the plugin and does not repeat values.
+- insert:
+    - id: dsh-crashlab
+      name: "@alexzeng666/dsh-crashlab"
+      inject: [tools]

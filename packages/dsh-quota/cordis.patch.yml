@@ -1,0 +1,9 @@
+# dsh-quota bundle patch.
+#
+# DSH only mounts packages that declare dsh.bundle.patch as a layer; this layer just mounts the plugin.
+# All parameters live in Config in src/index.js (single source of truth), so this file does not repeat values:
+# a config in the profile patch replaces this layer wholesale, and writing it in both places only lets defaults drift.
+- insert:
+    - id: dsh-quota
+      name: "@alexzeng666/dsh-quota"
+      inject: [tools]

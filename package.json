@@ -1,0 +1,9 @@
+{
+  "name": "dsh-verify-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "publish:all": "pwsh -NoProfile -File scripts/publish.ps1",
+    "publish:dry": "pwsh -NoProfile -File scripts/publish.ps1 -DryRun"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "name": "@alexzeng666/dsh-crashlab",
+  "version": "0.1.0",
+  "description": "Attribution report when a process dies: exit-code semantics, event log, minidump stack.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "src",
+    "vendor",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "crash",
+    "minidump",
+    "dbghelp",
+    "stacktrace"
+  ],
+  "homepage": "https://github.com/alexzeng666/dsh-verify#readme",
+  "bugs": {
+    "url": "https://github.com/alexzeng666/dsh-verify/issues"
+  },
+  "license": "MIT",
+  "author": "alexzeng666",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexzeng666/dsh-verify.git",
+    "directory": "packages/dsh-crashlab"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@alexzeng666/dsh-verify-contract": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4"
+  }
+}

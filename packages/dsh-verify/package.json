@@ -1,0 +1,58 @@
+{
+  "name": "@alexzeng666/dsh-verify",
+  "version": "0.1.0",
+  "description": "Verifies the agent's work instead of trusting it: run, assert, attribute, report.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "src",
+    "vendor",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "verify",
+    "assertion",
+    "evidence"
+  ],
+  "homepage": "https://github.com/alexzeng666/dsh-verify#readme",
+  "bugs": {
+    "url": "https://github.com/alexzeng666/dsh-verify/issues"
+  },
+  "license": "MIT",
+  "author": "alexzeng666",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexzeng666/dsh-verify.git",
+    "directory": "packages/dsh-verify"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@alexzeng666/dsh-quota": "file:../dsh-quota",
+    "@alexzeng666/dsh-crashlab": "file:../dsh-crashlab",
+    "@alexzeng666/dsh-probe": "file:../dsh-probe",
+    "@alexzeng666/dsh-timelab": "file:../dsh-timelab"
+  },
+  "devDependencies": {
+    "@alexzeng666/dsh-verify-contract": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@alexzeng666/dsh-verify-contract",
+  "version": "0.1.0",
+  "description": "Shared types for the dsh-verify suite (private, not published).",
+  "private": true,
+  "type": "module",
+  "types": "src/index.d.ts",
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "types"
+  ],
+  "homepage": "https://github.com/alexzeng666/dsh-verify#readme",
+  "bugs": {
+    "url": "https://github.com/alexzeng666/dsh-verify/issues"
+  },
+  "license": "MIT",
+  "author": "alexzeng666",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexzeng666/dsh-verify.git",
+    "directory": "packages/dsh-verify-contract"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
