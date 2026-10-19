@@ -79,6 +79,9 @@ It stops being enough when:
   plus mingw-w64; see [native/README.md](native/README.md).
 - **`verify_hook` covers 12 fixed APIs.** Anything else is reported as unsupported rather than
   half-hooked.
+- **Tracing a JIT runtime needs a narrower API set.** `verify_trace` hooks inline, and in node/V8
+  hooking `QueryPerformanceCounter` terminates the process with `STATUS_BREAKPOINT`. Pass `apis`
+  without it; every other API in the list is safe there.
 - **The agent still has to call these tools.** A system-prompt rule nudges it to, but nothing
   forces it. What the tools guarantee is that when it *does* verify, the result is real.
 

@@ -48,7 +48,8 @@ const parameters = {
     description:
       'Only hook these APIs (comma-separated, e.g. "Sleep,CreateFileW"); defaults to the plugin-configured apis. ' +
       'Available: Sleep / GetTickCount64 / QueryPerformanceCounter / CreateFileW / ReadFile / WriteFile / ' +
-      'LoadLibraryW / GetProcAddress / RegOpenKeyExW / RegQueryValueExW / CreateProcessW / VirtualAlloc.',
+      'LoadLibraryW / GetProcAddress / RegOpenKeyExW / RegQueryValueExW / CreateProcessW / VirtualAlloc. ' +
+      'When the target is a JIT runtime (node/V8), leave QueryPerformanceCounter out: hooking it there terminates the process with STATUS_BREAKPOINT.',
   },
 };
 
@@ -200,6 +201,15 @@ export function apply(ctx, config) {
           const actualMs = Date.now() - startedAt;
           const exitCode = traced.exit_code ?? '?';
           if (targetCrashed) warnings.push(`target terminated abnormally (exit code ${exitCode}): the recorder may have crashed it`);
+          // STATUS_BREAKPOINT with nothing recorded is the signature of an inline hook landing in code that
+          // already relies on breakpoint handling -- V8 (node) is the case we can reproduce: hooking
+          // QueryPerformanceCounter there terminates the process. Say which knob fixes it.
+          if (traced.target_exited === true && String(traced.exit_code ?? '').toUpperCase() === '0X80000003' && records.length === 0) {
+            warnings.push(
+              'the target died with STATUS_BREAKPOINT (0x80000003) before anything was recorded: an inline hook collided with the target\'s own breakpoint handling. ' +
+                'JIT runtimes are the usual case (in V8 it is QueryPerformanceCounter). Retry with apis narrowed to what you need, e.g. apis="CreateFileW,ReadFile,WriteFile"',
+            );
+          }
 
           const kinds = Object.keys(counts).length;
           const filterNote = pattern ? `, filter ${pattern}` : '';

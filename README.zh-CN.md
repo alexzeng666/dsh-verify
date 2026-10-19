@@ -75,6 +75,9 @@ Windows x64。一个包，十二个工具。四个子包是它的依赖——单
 - **native helper 是预编译的**，装的时候不需要编译器。自己编译要 cmake + mingw-w64，
   见 [native/README.md](native/README.md)。
 - **`verify_hook` 只覆盖固定的 12 个 API。** 白名单之外一律报「不支持」，不会假装 hook 上了。
+- **追踪 JIT 运行时要把 API 收窄。** `verify_trace` 走内联 hook，在 node/V8 里 hook
+  `QueryPerformanceCounter` 会以 `STATUS_BREAKPOINT` 把目标打死。传 `apis` 把它排除掉，
+  其余 API 在那边都是安全的。
 - **这些工具仍然得 agent 主动调。** 系统提示会催它，但没有强制力。工具能保证的是：
   它一旦真去验了，那个结果是实的。
 
