@@ -163,22 +163,32 @@ export function apply(ctx, config) {
           const shifted = await shiftProcess({ pid, factor, offsetSec, durationMs, outPath: logPath });
           if (shifted?.ok === false && shifted?.state === undefined) throw new Error(shifted.error ?? 'injection failed');
           if (shifted.dll_loaded === false) warnings.push('the DLL never showed up in the target module list');
-          if (shifted.state === 'failed') warnings.push('DLL init failed (MinHook did not start)');
-          if (shifted.state === 'timeout') warnings.push('target exited before the shift ended; the shift window closed early');
+          // attached === false: the DLL loaded but never opened the shared config, which is a verifier-side
+          // failure (usually a target at a lower integrity level), not a property of the target.
+          const attached = shifted.attached !== false;
+          if (!attached) {
+            warnings.push('the payload never attached: the target could not open the shared config (a target running at a lower integrity level is the usual cause)');
+          } else if (shifted.state === 'failed') {
+            warnings.push('DLL init failed (MinHook did not start)');
+          }
+          if (shifted.state === 'timeout' && shifted.target_exited === true) {
+            warnings.push('target exited before the shift ended; the shift window closed early');
+          }
           if (shifted.hook_failures) warnings.push(`${shifted.hook_failures} hook(s) failed to install`);
 
           const installed = Number(shifted.hooks_installed ?? 0);
           const mode = Number.isFinite(offsetSec) && offsetSec !== 0 ? 'offset' : 'factor';
           const description = describeShift(offsetSec, factor);
-          const summary =
-            installed > 0
+          const summary = !attached
+            ? `verifier did not complete: the payload loaded into pid ${pid} but never attached to the shared config`
+            : installed > 0
               ? `shifted pid ${pid} clock ${description} (active for ${formatMs(durationMs)}, ${installed} APIs)`
-              : `no hooks installed at all: target may be protected, or the platform is unsupported (pid ${pid})`;
+              : `no hooks installed at all: ${pid} could not be hooked (the target may resolve these APIs somewhere MinHook cannot reach, or another tool already claimed them)`;
 
           const value = {
             source: 'timelab',
             verify_id: verifyId,
-            result: installed > 0 ? 'pass' : 'error',
+            result: !attached ? 'error' : installed > 0 ? 'pass' : 'error',
             summary,
             detail: {
               pid,
@@ -186,6 +196,7 @@ export function apply(ctx, config) {
               offset_sec: offsetSec,
               factor,
               duration_ms: durationMs,
+              attached,
               hooks_installed: installed,
               hook_failures: shifted.hook_failures ?? 0,
               covered_apis: COVERED_APIS,

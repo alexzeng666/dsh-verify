@@ -1,6 +1,6 @@
 {
   "name": "@alexzeng666/dsh-verify",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Verifies the agent's work instead of trusting it: run, assert, attribute, report.",
   "type": "module",
   "main": "src/index.js",
@@ -43,10 +43,10 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@alexzeng666/dsh-quota": "^0.1.0",
-    "@alexzeng666/dsh-crashlab": "^0.1.0",
-    "@alexzeng666/dsh-probe": "^0.1.0",
-    "@alexzeng666/dsh-timelab": "^0.1.0"
+    "@alexzeng666/dsh-quota": "^0.1.1",
+    "@alexzeng666/dsh-crashlab": "^0.1.1",
+    "@alexzeng666/dsh-probe": "^0.1.1",
+    "@alexzeng666/dsh-timelab": "^0.1.1"
   },
   "devDependencies": {
     "@alexzeng666/dsh-verify-contract": "workspace:*"

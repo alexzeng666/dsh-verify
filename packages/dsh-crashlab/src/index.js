@@ -13,7 +13,7 @@
  * is still produced, only marked error or with a degraded explanation.
  */
 import { existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import z from '@deepseek-ai/schemastery';
 import { defineTool } from '@deepseek-ai/dsh-tools';
@@ -192,7 +192,11 @@ export function apply(ctx, config) {
         const startedAt = Date.now();
         const workspace = resolveWorkspace(exec);
         const verifyId = nextId('VC-', workspace);
-        const dumpPath = String(args?.dump_path ?? '').trim();
+        const rawDumpPath = String(args?.dump_path ?? '').trim();
+        // A relative dump_path is relative to the workspace, like every other path argument in the suite.
+        // Resolving it against the host process cwd instead would report "dump not found" for a file that is
+        // sitting right where the caller pointed.
+        const dumpPath = rawDumpPath === '' || isAbsolute(rawDumpPath) ? rawDumpPath : resolve(workspace, rawDumpPath);
         const cmd = String(args?.cmd ?? '').trim();
         const pid = Number.isFinite(args?.pid) ? Number(args.pid) : undefined;
         const timeoutMs = Number.isFinite(args?.timeout_ms) ? Number(args.timeout_ms) : Number(cfg.defaultTimeoutMs ?? 30000);

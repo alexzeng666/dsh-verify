@@ -1,6 +1,6 @@
 {
   "name": "@alexzeng666/dsh-quota",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Caps CPU / memory / wall clock for agent-run commands, killing them on overrun.",
   "type": "module",
   "main": "src/index.js",

@@ -1,6 +1,6 @@
 {
   "name": "@alexzeng666/dsh-timelab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Speeds up, slows down, or shifts the target process's clock.",
   "type": "module",
   "main": "src/index.js",

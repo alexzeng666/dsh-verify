@@ -170,9 +170,17 @@ export function apply(ctx, config) {
             throw new Error(traced.error ?? 'injection failed');
           }
           if (traced.dll_loaded === false) warnings.push('the DLL never appeared in the target module list');
+          const attached = traced.attached !== false;
+          if (!attached) {
+            warnings.push('the payload never attached: the target could not open the shared config (a target running at a lower integrity level is the usual cause)');
+          }
           const targetCrashed = traced.state === 'failed' && traced.target_exited === true;
-          if (traced.state === 'failed' && !targetCrashed) warnings.push('DLL initialization failed (see hook_failures below)');
-          if (traced.state === 'timeout') warnings.push('the target exited before the trace ended; only the records already flushed are available');
+          if (traced.state === 'failed' && !targetCrashed && attached) warnings.push('DLL initialization failed (see hook_failures below)');
+          // "timeout" alone only means the duration elapsed without the DLL reporting done; it says nothing
+          // about the target having exited. Only claim an early exit when the helper actually saw one.
+          if (traced.state === 'timeout' && traced.target_exited === true) {
+            warnings.push('the target exited before the trace ended; only the records already flushed are available');
+          }
           if (traced.hook_failures) warnings.push(`${traced.hook_failures} hooks failed to install (most likely already claimed by another tool)`);
 
           const records = readJsonl(workspace, `${verifyId}.trace.jsonl`);
@@ -188,7 +196,7 @@ export function apply(ctx, config) {
           // are real, so report pass + a warning.
           const noRecords = records.length === 0;
           const earlyExit = traced.target_exited === true && !targetCrashed;
-          const traceBroken = noRecords || targetCrashed;
+          const traceBroken = !attached || noRecords || targetCrashed;
           const actualMs = Date.now() - startedAt;
           const exitCode = traced.exit_code ?? '?';
           if (targetCrashed) warnings.push(`target terminated abnormally (exit code ${exitCode}): the recorder may have crashed it`);
@@ -196,7 +204,9 @@ export function apply(ctx, config) {
           const kinds = Object.keys(counts).length;
           const filterNote = pattern ? `, filter ${pattern}` : '';
           let summary;
-          if (noRecords && targetCrashed) {
+          if (!attached) {
+            summary = `verifier did not complete: the payload loaded into pid ${pid} but never attached to the shared config`;
+          } else if (noRecords && targetCrashed) {
             summary = `verifier did not complete: target terminated abnormally (${exitCode}) and not a single record was captured`;
           } else if (noRecords) {
             summary = `verifier did not complete: no records captured at all (state=${traced?.state ?? '?'})`;
@@ -219,6 +229,7 @@ export function apply(ctx, config) {
             apis,
             pattern,
             state: traced?.state,
+            attached,
             target_exited: traced?.target_exited,
             exit_code: traced?.exit_code,
             records: records.length,
@@ -358,6 +369,12 @@ export function apply(ctx, config) {
           } catch {
             throw new Error(`ret is not an integer: ${JSON.stringify(rawRet)}`);
           }
+          // Negative values are legitimate (INVALID_HANDLE_VALUE = -1) and are passed as their 64-bit two's
+          // complement; anything outside that window is a caller mistake, not something to silently truncate.
+          if (ret < -(2n ** 63n) || ret > 2n ** 64n - 1n) {
+            throw new Error(`ret is outside the 64-bit range: ${rawRet}`);
+          }
+          const retHex = `0x${BigInt.asUintN(64, ret).toString(16)}`;
 
           if (!probeAvailable()) throw new Error('native helper unavailable: hook_host.exe + value_hook.dll required');
 
@@ -366,37 +383,58 @@ export function apply(ctx, config) {
             source: 'probe',
             event: 'hooked',
             pid,
-            detail: { verify_id: verifyId, api, nth, ret: `0x${ret.toString(16)}`, duration_ms: durationMs },
+            detail: { verify_id: verifyId, api, nth, ret: retHex, duration_ms: durationMs },
           });
 
           const hooked = await hookValue({ pid, api, nth, ret, durationMs, outPath: logPath });
           if (hooked?.ok === false && hooked?.state === undefined) throw new Error(hooked.error ?? 'injection failed');
           if (hooked.dll_loaded === false) warnings.push('the DLL never appeared in the target module list');
-          if (hooked.state === 'failed') warnings.push('DLL initialization failed: the API is not on the whitelist, or the hook could not be installed');
-          if (hooked.state === 'timeout') warnings.push('the target exited before the hook window ended; the active window ended early');
-          if (hooked.calls_overridden === 0 && hooked.state === 'done') {
+          // attached === false: the DLL loaded but never opened the shared config. Usually the target runs at a
+          // lower integrity level than this host, so the mapping is unopenable from inside it. That is a
+          // verifier-side failure, not evidence that the target never called the API.
+          const attached = hooked.attached !== false;
+          if (!attached) {
+            warnings.push('the payload never attached: the target could not open the shared config (a target running at a lower integrity level is the usual cause)');
+          } else if (hooked.state === 'failed') {
+            warnings.push('DLL initialization failed: the API is not on the whitelist, or the hook could not be installed');
+          }
+          if (hooked.state === 'timeout' && hooked.target_exited === true) {
+            warnings.push('the target exited before the hook window ended; the active window ended early');
+          }
+          const installedHooks = Number(hooked.hooks_installed ?? 0);
+          if (attached && installedHooks === 0 && hooked.state !== 'failed') {
+            warnings.push('no hook was installed: the API could not be resolved in the target, or another tool already claimed it');
+          }
+          if (attached && hooked.calls_overridden === 0 && hooked.state === 'done') {
             warnings.push('nothing was overridden: the target never called this API during the window');
           }
 
           const overridden = Number(hooked.calls_overridden ?? 0);
           const seen = Number(hooked.calls_seen ?? 0);
-          const summary =
-            hooked.state === 'failed'
+          // A hook that was never installed is not a passing verification, whatever the call counters say.
+          const broken = !attached || hooked.state === 'failed' || installedHooks === 0;
+          const summary = !attached
+            ? `verifier did not complete: the payload loaded into pid ${pid} but never attached to the shared config`
+            : hooked.state === 'failed'
               ? `hook not installed: ${api} (most likely not on the whitelist, or another tool already claimed that API)`
-              : overridden > 0
-                ? `overrode the return value of ${api} to 0x${ret.toString(16)} (${overridden}/${seen} calls within ${formatMs(durationMs)})`
-                : `hook installed, but the target never called ${api} within ${formatMs(durationMs)}`;
+              : installedHooks === 0
+                ? `hook was never installed: ${api} could not be resolved inside the target`
+                : overridden > 0
+                  ? `overrode the return value of ${api} to ${retHex} (${overridden}/${seen} calls within ${formatMs(durationMs)})`
+                  : `hook installed, but the target never called ${api} within ${formatMs(durationMs)}`;
 
           const value = {
             source: 'probe',
             verify_id: verifyId,
-            result: hooked.state === 'failed' ? 'error' : 'pass',
+            result: broken ? 'error' : 'pass',
             summary,
             detail: {
               pid,
               api,
               when: nth === 0 ? 'always' : `nth:${nth}`,
-              ret_hex: `0x${ret.toString(16)}`,
+              ret_hex: retHex,
+              attached,
+              hooks_installed: installedHooks,
               calls_seen: seen,
               calls_overridden: overridden,
               duration_ms: durationMs,

@@ -1,6 +1,6 @@
 {
   "name": "@alexzeng666/dsh-crashlab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Attribution report when a process dies: exit-code semantics, event log, minidump stack.",
   "type": "module",
   "main": "src/index.js",

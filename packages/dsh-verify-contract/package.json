@@ -1,6 +1,6 @@
 {
   "name": "@alexzeng666/dsh-verify-contract",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared types for the dsh-verify suite (private, not published).",
   "private": true,
   "type": "module",

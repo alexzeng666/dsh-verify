@@ -112,7 +112,9 @@ export function hookValue({ pid, api, nth, ret, durationMs, outPath }) {
       '--nth',
       String(Number.isFinite(nth) ? nth : 0),
       '--ret',
-      `0x${BigInt(ret).toString(16)}`,
+      // The helper parses --ret with stoull, so the text must be unsigned: BigInt(-1).toString(16) is "-1",
+      // which used to reach the native side as "0x-1" and abort it. Two's-complement it first.
+      `0x${BigInt.asUintN(64, BigInt(ret)).toString(16)}`,
       '--duration-ms',
       String(durationMs),
     ];

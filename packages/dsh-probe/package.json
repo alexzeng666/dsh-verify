@@ -1,6 +1,6 @@
 {
   "name": "@alexzeng666/dsh-probe",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Traces which APIs any process calls, and with what arguments.",
   "type": "module",
   "main": "src/index.js",

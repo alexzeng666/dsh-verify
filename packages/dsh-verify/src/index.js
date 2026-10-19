@@ -345,7 +345,11 @@ export function apply(ctx, config) {
         const timeoutMs = Number.isFinite(args?.timeout_ms)
           ? Number(args.timeout_ms)
           : Number(cfg.defaultTimeoutMs ?? 120000);
-        const cwd = String(args?.cwd ?? '').trim() || workspace;
+        // A relative cwd is relative to the workspace, like every other path argument in the suite: resolving
+        // it against the host process cwd instead makes CreateProcessW fail with Win32 267 (ERROR_DIRECTORY)
+        // for a directory that plainly exists where the caller pointed.
+        const rawCwd = String(args?.cwd ?? '').trim();
+        const cwd = rawCwd === '' ? workspace : isAbsolute(rawCwd) ? rawCwd : resolve(workspace, rawCwd);
         const expectExit = Number.isFinite(args?.expect_exit) ? Number(args.expect_exit) : undefined;
         const scope = String(args?.scope ?? 'quick').toLowerCase() === 'full' ? 'full' : 'quick';
         const useShell = args?.shell === true;
@@ -359,6 +363,10 @@ export function apply(ctx, config) {
         try {
           if (cmd === '') throw new Error('cmd is required');
           if (!runnerAvailable()) throw new Error('native helper unavailable (not built or wrong platform): crash_helper.exe is required');
+          // Checked here so a bad cwd is reported as a bad cwd instead of surfacing as an opaque
+          // CreateProcessW failure from inside the native helper.
+          if (!existsSync(cwd)) throw new Error(`cwd does not exist: ${cwd}`);
+          if (!statSync(cwd).isDirectory()) throw new Error(`cwd is not a directory: ${cwd}`);
 
           // The directory must exist before spawning: stdout/stderr are redirected to
           // files under .verify, and a missing directory makes redirection fail silently

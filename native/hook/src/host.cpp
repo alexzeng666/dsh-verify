@@ -77,6 +77,56 @@ uintptr_t FindRemoteModule(DWORD pid, const std::wstring& name) {
   return base;
 }
 
+// The target can run at a lower integrity level than this host (a sandboxed parent, a path-based policy,
+// or an AppContainer-ish wrapper). Two independent mechanisms then make a default mapping unopenable from
+// inside the target: the DACL (fixed by a NULL DACL) and the mandatory integrity label, which a NULL DACL
+// does not touch -- a low-integrity process still cannot open a medium-integrity object for write.
+// The label is lowered to Low so the payload can always attach; the object is Local\ (session-scoped) and
+// lives only for the duration of one call, so nothing wider is exposed.
+struct PermissiveSecurity {
+  SECURITY_DESCRIPTOR sd{};
+  SECURITY_ATTRIBUTES sa{};
+  ACL* sacl = nullptr;
+  BYTE low_sid[SECURITY_MAX_SID_SIZE]{};
+
+  PermissiveSecurity() {
+    DWORD sid_size = sizeof(low_sid);
+    const bool have_low = CreateWellKnownSid(WinLowLabelSid, nullptr, low_sid, &sid_size) != FALSE;
+    const DWORD acl_size = sizeof(ACL) + sizeof(SYSTEM_MANDATORY_LABEL_ACE) + (have_low ? sid_size : 0);
+    sacl = static_cast<ACL*>(LocalAlloc(LPTR, acl_size));
+    if (sacl != nullptr) {
+      InitializeAcl(sacl, acl_size, ACL_REVISION);
+      if (have_low) AddMandatoryAce(sacl, ACL_REVISION, 0, SYSTEM_MANDATORY_LABEL_NO_WRITE_UP, low_sid);
+    }
+    InitializeSecurityDescriptor(&sd, SECURITY_DESCRIPTOR_REVISION);
+    SetSecurityDescriptorDacl(&sd, TRUE, nullptr, FALSE);
+    if (sacl != nullptr) SetSecurityDescriptorSacl(&sd, TRUE, sacl, FALSE);
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.lpSecurityDescriptor = &sd;
+    sa.bInheritHandle = FALSE;
+  }
+
+  ~PermissiveSecurity() {
+    if (sacl != nullptr) LocalFree(sacl);
+  }
+
+  PermissiveSecurity(const PermissiveSecurity&) = delete;
+  PermissiveSecurity& operator=(const PermissiveSecurity&) = delete;
+};
+
+// A low-integrity target cannot create a file in a medium-integrity directory, so the payload's own
+// CreateFileW on the output path fails and the run reports records that never reached disk. Creating the
+// file here with a low label hands the payload a handle target it is allowed to write.
+bool PrepareOutputFile(const std::wstring& path) {
+  if (path.empty()) return true;
+  PermissiveSecurity security;
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &security.sa, CREATE_ALWAYS,
+                            FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return false;
+  CloseHandle(file);
+  return true;
+}
+
 bool InjectDll(HANDLE process, const std::wstring& dll, std::string* error) {
   const SIZE_T bytes = (dll.size() + 1) * sizeof(wchar_t);
   void* remote = VirtualAllocEx(process, nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -227,8 +277,8 @@ int RunTrace(const Args& args, const std::string& apis) {
 
   wchar_t mapping_name[128];
   wsprintfW(mapping_name, DSH_PROBE_MAPPING_PREFIX L"%lu", args.pid);
-  HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(ProbeConfig),
-                                      mapping_name);
+  PermissiveSecurity security;
+  HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, &security.sa, PAGE_READWRITE, 0, sizeof(ProbeConfig), mapping_name);
   if (mapping == nullptr) {
     CloseHandle(process);
     return fail("CreateFileMapping failed (Win32 " + std::to_string(GetLastError()) + ")");
@@ -245,6 +295,7 @@ int RunTrace(const Args& args, const std::string& apis) {
   config->duration_ms = args.duration_ms;
   config->api_mask = args.api_mask;
   wcsncpy_s(config->out_path, args.out.c_str(), _TRUNCATE);
+  PrepareOutputFile(args.out);
 
   std::string error;
   const bool injected = InjectDll(process, args.dll, &error);
@@ -272,6 +323,10 @@ int RunTrace(const Args& args, const std::string& apis) {
   DWORD exit_code = STILL_ACTIVE;
   const bool crashed = ExitedWithException(process, &exit_code);
   if (crashed && state != kProbeDone) state = kProbeFailed;
+  // Still Idle after the grace period means the payload never opened the shared config: the DLL loaded but
+  // never attached. Reporting "timeout" would blame the target for the verifier's own failure.
+  const bool attached = state != kProbeIdle;
+  if (!attached) state = kProbeFailed;
 
   EjectDll(process, args.pid, args.dll);
 
@@ -280,10 +335,10 @@ int RunTrace(const Args& args, const std::string& apis) {
   const bool done = state == kProbeDone;
   std::printf(
       "{\"ok\":%s,\"state\":\"%s\",\"records\":%lu,\"hook_failures\":%lu,\"pid\":%lu,\"out_path\":%s,"
-      "\"duration_ms\":%lu,\"dll_loaded\":%s,\"target_exited\":%s,\"exit_code\":\"0x%08lX\"}\n",
+      "\"duration_ms\":%lu,\"attached\":%s,\"dll_loaded\":%s,\"target_exited\":%s,\"exit_code\":\"0x%08lX\"}\n",
       done ? "true" : "false", done ? "done" : (state == kProbeFailed ? "failed" : "timeout"), records, failures,
-      args.pid, wp::JsonString(wp::ToUtf8(args.out)).c_str(), args.duration_ms, loaded ? "true" : "false",
-      exit_code != STILL_ACTIVE ? "true" : "false", exit_code);
+      args.pid, wp::JsonString(wp::ToUtf8(args.out)).c_str(), args.duration_ms, attached ? "true" : "false",
+      loaded ? "true" : "false", exit_code != STILL_ACTIVE ? "true" : "false", exit_code);
   std::fflush(stdout);
 
   UnmapViewOfFile(config);
@@ -314,7 +369,8 @@ int RunShift(const Args& args) {
 
   wchar_t mapping_name[128];
   wsprintfW(mapping_name, DSH_TIME_MAPPING_PREFIX L"%lu", args.pid);
-  HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(TimeConfig), mapping_name);
+  PermissiveSecurity security;
+  HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, &security.sa, PAGE_READWRITE, 0, sizeof(TimeConfig), mapping_name);
   if (mapping == nullptr) {
     CloseHandle(process);
     return fail("CreateFileMapping failed (Win32 " + std::to_string(GetLastError()) + ")");
@@ -331,7 +387,10 @@ int RunShift(const Args& args) {
   config->factor = args.factor > 0.0 ? args.factor : 1.0;
   config->offset_100ns = args.offset_seconds * 10000000LL;  // seconds -> 100ns
   config->duration_ms = args.duration_ms;
-  if (!args.out.empty()) wcsncpy_s(config->out_path, args.out.c_str(), _TRUNCATE);
+  if (!args.out.empty()) {
+    wcsncpy_s(config->out_path, args.out.c_str(), _TRUNCATE);
+    PrepareOutputFile(args.out + L".log");
+  }
 
   std::string error;
   if (!InjectDll(process, args.dll, &error)) {
@@ -354,18 +413,20 @@ int RunShift(const Args& args) {
   DWORD exit_code = STILL_ACTIVE;
   const bool crashed = ExitedWithException(process, &exit_code);
   if (crashed && state != kTimeDone) state = kTimeFailed;
+  const bool attached = state != kTimeIdle;
+  if (!attached) state = kTimeFailed;
 
   EjectDll(process, args.pid, args.dll);
 
   const bool done = state == kTimeDone;
   std::printf(
       "{\"ok\":%s,\"state\":\"%s\",\"pid\":%lu,\"mode\":\"%s\",\"factor\":%.4f,\"offset_sec\":%lld,"
-      "\"hooks_installed\":%lu,\"hook_failures\":%lu,\"calls\":%ld,\"duration_ms\":%lu,\"dll_loaded\":%s,"
-      "\"target_exited\":%s,\"exit_code\":\"0x%08lX\"}\n",
+      "\"hooks_installed\":%lu,\"hook_failures\":%lu,\"calls\":%ld,\"duration_ms\":%lu,\"attached\":%s,"
+      "\"dll_loaded\":%s,\"target_exited\":%s,\"exit_code\":\"0x%08lX\"}\n",
       done ? "true" : "false", done ? "done" : (state == kTimeFailed ? "failed" : "timeout"), args.pid,
       config->mode == 1 ? "offset" : "factor", args.factor, static_cast<long long>(args.offset_seconds),
-      config->hooks_installed, config->hook_failures, config->calls, args.duration_ms, loaded ? "true" : "false",
-      exit_code != STILL_ACTIVE ? "true" : "false", exit_code);
+      config->hooks_installed, config->hook_failures, config->calls, args.duration_ms, attached ? "true" : "false",
+      loaded ? "true" : "false", exit_code != STILL_ACTIVE ? "true" : "false", exit_code);
   std::fflush(stdout);
 
   UnmapViewOfFile(config);
@@ -395,8 +456,8 @@ int RunHook(const Args& args) {
 
   wchar_t mapping_name[128];
   wsprintfW(mapping_name, DSH_VALUEHOOK_MAPPING_PREFIX L"%lu", args.pid);
-  HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(ValueHookConfig),
-                                      mapping_name);
+  PermissiveSecurity security;
+  HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, &security.sa, PAGE_READWRITE, 0, sizeof(ValueHookConfig), mapping_name);
   if (mapping == nullptr) {
     CloseHandle(process);
     return fail("CreateFileMapping failed (Win32 " + std::to_string(GetLastError()) + ")");
@@ -415,7 +476,10 @@ int RunHook(const Args& args) {
   config->duration_ms = args.duration_ms;
   wcsncpy_s(config->api, args.api.c_str(), _TRUNCATE);
   if (!args.module.empty()) wcsncpy_s(config->module, args.module.c_str(), _TRUNCATE);
-  if (!args.out.empty()) wcsncpy_s(config->out_path, args.out.c_str(), _TRUNCATE);
+  if (!args.out.empty()) {
+    wcsncpy_s(config->out_path, args.out.c_str(), _TRUNCATE);
+    PrepareOutputFile(args.out + L".log");
+  }
 
   std::string error;
   if (!InjectDll(process, args.dll, &error)) {
@@ -438,6 +502,8 @@ int RunHook(const Args& args) {
   DWORD exit_code = STILL_ACTIVE;
   const bool crashed = ExitedWithException(process, &exit_code);
   if (crashed && state != kValueHookDone) state = kValueHookFailed;
+  const bool attached = state != kValueHookIdle;
+  if (!attached) state = kValueHookFailed;
 
   EjectDll(process, args.pid, args.dll);
 
@@ -449,11 +515,12 @@ int RunHook(const Args& args) {
   std::printf(
       "{\"ok\":%s,\"state\":\"%s\",\"pid\":%lu,\"api\":%s,\"nth\":%lu,\"ret\":\"0x%llX\","
       "\"hooks_installed\":%lu,\"hook_failures\":%lu,\"calls_seen\":%lu,\"calls_overridden\":%lu,"
-      "\"duration_ms\":%lu,\"dll_loaded\":%s,\"target_exited\":%s,\"exit_code\":\"0x%08lX\"}\n",
+      "\"duration_ms\":%lu,\"attached\":%s,\"dll_loaded\":%s,\"target_exited\":%s,\"exit_code\":\"0x%08lX\"}\n",
       done ? "true" : "false", done ? "done" : (state == kValueHookFailed ? "failed" : "timeout"), args.pid,
       wp::JsonString(wp::ToUtf8(args.api)).c_str(), args.nth,
       static_cast<unsigned long long>(args.ret), installed, failures, calls_seen, calls_overridden,
-      args.duration_ms, loaded ? "true" : "false", exit_code != STILL_ACTIVE ? "true" : "false", exit_code);
+      args.duration_ms, attached ? "true" : "false", loaded ? "true" : "false",
+      exit_code != STILL_ACTIVE ? "true" : "false", exit_code);
   std::fflush(stdout);
 
   UnmapViewOfFile(config);
