@@ -43,10 +43,10 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@alexzeng666/dsh-quota": "workspace:*",
-    "@alexzeng666/dsh-crashlab": "workspace:*",
-    "@alexzeng666/dsh-probe": "workspace:*",
-    "@alexzeng666/dsh-timelab": "workspace:*"
+    "@alexzeng666/dsh-quota": "^0.1.0",
+    "@alexzeng666/dsh-crashlab": "^0.1.0",
+    "@alexzeng666/dsh-probe": "^0.1.0",
+    "@alexzeng666/dsh-timelab": "^0.1.0"
   },
   "devDependencies": {
     "@alexzeng666/dsh-verify-contract": "workspace:*"
